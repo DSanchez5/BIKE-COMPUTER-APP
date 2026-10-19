@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bike computer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bike">
+<style>
+:root{--bg:#f7f9fb;--ink:#14283c;--sub:#5b6b7a;--line:#d5dde5;--go:#0b6bcb;--stop:#c0392b;--card:#ffffff;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1b27;--ink:#eef3f8;--sub:#9fb0c0;--line:#2a3b4c;--go:#4aa3ff;--stop:#ff6b5b;--card:#162636}}
+:root[data-theme="dark"]{--bg:#0f1b27;--ink:#eef3f8;--sub:#9fb0c0;--line:#2a3b4c;--go:#4aa3ff;--stop:#ff6b5b;--card:#162636}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;display:-webkit-flex;display:flex;-webkit-flex-direction:column;flex-direction:column;max-width:560px;margin:0 auto;padding:10px 14px}
+.top{display:-webkit-flex;display:flex;-webkit-justify-content:space-between;justify-content:space-between;color:var(--sub);font-size:15px}
+#gps{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.unit{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:4px 12px;font-size:15px}
+.speed{text-align:center;padding:6px 0 2px}
+#spd{font-size:112px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums}
+#spdu{font-size:20px;color:var(--sub)}
+.grid{display:grid;grid-template-columns:1fr 1fr;grid-gap:10px;margin-top:8px}
+.cell{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.cell b{display:block;font-size:40px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.cell span{font-size:15px;color:var(--sub)}
+.btns{margin-top:auto;padding-top:12px;display:grid;grid-template-columns:2fr 1fr;grid-gap:10px}
+button{font:inherit;font-size:26px;font-weight:700;border:0;border-radius:14px;padding:20px 8px;color:#fff}
+#main{background:var(--go)}
+#fin{background:var(--stop)}
+button:disabled{opacity:.35}
+#note{color:var(--sub);font-size:15px;text-align:center;padding:10px 0 4px;min-height:34px}
+</style>
+</head>
+<body>
+<div class="top"><div id="gps">Press Start to begin</div><button class="unit" id="unit" style="font-size:15px;padding:4px 12px;color:var(--ink)">km</button></div>
+<div class="speed"><div id="spd">0.0</div><div id="spdu">km/h</div></div>
+<div class="grid">
+<div class="cell"><b id="dist">0.00</b><span id="distl">Distance (km)</span></div>
+<div class="cell"><b id="time">0:00</b><span>Moving time</span></div>
+<div class="cell"><b id="avg">0.0</b><span id="avgl">Average (km/h)</span></div>
+<div class="cell"><b id="max">0.0</b><span id="maxl">Top speed (km/h)</span></div>
+</div>
+<div id="note"></div>
+<div class="btns"><button id="main">Start</button><button id="fin" disabled>Finish</button></div>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i);};
+var mi=false,state='idle',dist=0,mov=0,mx=0,spd=0,last=null,lastT=0,wid=null,tmr=null;
+try{mi=localStorage.getItem('bc_unit')==='mi';}catch(e){}
+function K(){return mi?0.621371:1;}
+function pad(n){return n<10?'0'+n:''+n;}
+function fmt(s){s=Math.floor(s);var h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>0?h+':'+pad(m)+':'+pad(s%60):m+':'+pad(s%60);}
+function hav(a,b,c,d){var R=6371000,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r;
+var q=Math.sin(x/2)*Math.sin(x/2)+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)*Math.sin(y/2);
+return 2*R*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));}
+function draw(){
+var u=mi?'mph':'km/h',d=mi?'mi':'km';
+$('spd').textContent=(spd*3.6*K()).toFixed(1);$('spdu').textContent=u;
+$('dist').textContent=(dist/1000*K()).toFixed(2);$('distl').textContent='Distance ('+d+')';
+$('time').textContent=fmt(mov);
+$('avg').textContent=(mov>0?dist/mov*3.6*K():0).toFixed(1);$('avgl').textContent='Average ('+u+')';
+$('max').textContent=(mx*3.6*K()).toFixed(1);$('maxl').textContent='Top speed ('+u+')';
+$('unit').textContent=mi?'mi':'km';}
+function gps(t){$('gps').textContent=t;}
+function onPos(p){
+var c=p.coords;if(c.accuracy>30){gps('Weak GPS signal (±'+Math.round(c.accuracy)+' m)');return;}
+gps('GPS good (±'+Math.round(c.accuracy)+' m)');
+if(state!=='run')return;
+var t=p.timestamp/1000;
+if(last){var dt=t-lastT;
+if(dt>0){var d=hav(last[0],last[1],c.latitude,c.longitude);
+var v=(c.speed!==null&&c.speed>=0)?c.speed:d/dt;
+if(v>=0.8&&v<30&&d<300){dist+=d;mov+=Math.min(dt,10);spd=v;if(v>mx)mx=v;}else{spd=0;}}}
+last=[c.latitude,c.longitude];lastT=t;draw();}
+function onErr(e){gps(e.code===1?'Location blocked. Allow it in Settings > Privacy > Location Services > Safari.':'Searching for GPS…');}
+function begin(){
+if(!navigator.geolocation){gps('This browser has no GPS support');return;}
+state='run';last=null;$('main').textContent='Pause';$('fin').disabled=false;$('note').textContent='Keep the screen on. Set Auto-Lock to Never.';gps('Searching for GPS…');
+if(wid===null)wid=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000});}
+function pause(){state='pause';spd=0;last=null;$('main').textContent='Resume';draw();}
+function finish(){
+state='idle';spd=0;if(wid!==null){navigator.geolocation.clearWatch(wid);wid=null;}
+var s='Ride saved: '+(dist/1000*K()).toFixed(2)+(mi?' mi':' km')+' in '+fmt(mov);
+try{localStorage.setItem('bc_last',s);}catch(e){}
+$('note').textContent=s;$('main').textContent='New ride';$('fin').disabled=true;gps('Ride finished');}
+function reset(){dist=0;mov=0;mx=0;spd=0;last=null;draw();}
+$('main').onclick=function(){
+if(state==='idle'){reset();begin();}else if(state==='run'){pause();}else{begin();}};
+$('fin').onclick=finish;
+$('unit').onclick=function(){mi=!mi;try{localStorage.setItem('bc_unit',mi?'mi':'km');}catch(e){}draw();};
+try{var l=localStorage.getItem('bc_last');if(l)$('note').textContent=l;}catch(e){}
+draw();
+})();
+</script>
+</body>
+</html>
